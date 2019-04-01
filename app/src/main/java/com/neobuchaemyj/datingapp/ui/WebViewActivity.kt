@@ -20,7 +20,10 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.ProgressBar
 import androidx.core.app.ActivityCompat
-import com.neobuchaemyj.datingapp.*
+import com.neobuchaemyj.datingapp.CONVERSION_DATA
+import com.neobuchaemyj.datingapp.EXTRA_TASK_URL
+import com.neobuchaemyj.datingapp.Model.Conversion
+import com.neobuchaemyj.datingapp.R
 import com.neobuchaemyj.datingapp._core.BaseActivity
 import im.delight.android.webview.AdvancedWebView
 import kotlinx.android.synthetic.main.activity_web_view.*
@@ -51,30 +54,23 @@ class WebViewActivity : BaseActivity(), AdvancedWebView.Listener {
         progressBar = progress_bar
     }
 
-    private lateinit var conversionUrl: String
-    private lateinit var conversionL: String
-    private lateinit var conversionOffer: String
-    private lateinit var conversionSub: String
-    private lateinit var conversionTid: String
-
+    private var conversions: MutableList<Conversion> = mutableListOf()
     override fun setUI() {
-        getValuesFromDatabase({
-            val values = it.child(CONVERSION_DATA)
-            conversionUrl = values.child(CONVERSION_URL).value as String
-            conversionL = values.child(CONVERSION_L).value as String
-            conversionOffer = values.child(CONVERSION_OFFER).value as String
-            conversionSub = values.child(CONVERSION_SUB).value as String
-            conversionTid = values.child(CONVERSION_TID).value as String
+        getValuesFromDatabase({ dataSnapshot ->
+            val values = dataSnapshot.child(CONVERSION_DATA)
+            for (conversionSnapshot in values.children) {
+                val conversion = conversionSnapshot.getValue(Conversion::class.java)
+                conversion?.conversionEvent = conversionSnapshot.key!!
+                conversion?.let { conversions.add(it) }
+            }
+
+            webView.loadUrl(intent.getStringExtra(EXTRA_TASK_URL))
         })
         logEvent("web-view-screen")
         progressBar.visibility = View.VISIBLE
 
         configureWebView()
 
-        webView.loadUrl(intent.getStringExtra(EXTRA_TASK_URL))
-        //webView.loadUrl("https://en.imgbb.com/")
-        // Just test TODO: replace
-//        webView.loadUrl("https://kasfigo.club/0a52ed5/postback?sub_id={sub1}&tid={transactionid}&status={status}&payout={sum}&currency={currency}&offer_name={offer_name}&lead_status=2&sale_status=1&rejected_status=3&ios_idfa={ios_idfa}&android_id={android_id}&from=alfaleads.ru")
     }
 
     @SuppressLint("SimpleDateFormat")
@@ -175,17 +171,7 @@ class WebViewActivity : BaseActivity(), AdvancedWebView.Listener {
             override fun onPageFinished(view: WebView?, url: String?) {
                 // TODO: add values to determine if url is for conversion response, you can add these values to firebase database
                 url?.let { urlSafe ->
-                    if (checkIfUrlIsSuitable(urlSafe)) {
-                        val uri = Uri.parse(url)
-                        val args = uri.queryParameterNames
-                        val bundle = Bundle()
-
-                        args.forEach { key ->
-                            bundle.putString(key, uri.getQueryParameter(key))
-                        }
-
-                        logEvent("conversion_response", bundle)
-                    }
+                    logEventIfUrlIsSuitable(urlSafe)
                 }
 
                 progressBar.visibility = View.GONE
@@ -194,14 +180,21 @@ class WebViewActivity : BaseActivity(), AdvancedWebView.Listener {
         verifyStoragePermissions(this)
     }
 
-    private fun checkIfUrlIsSuitable(urlSafe: String): Boolean {
-        return urlSafe.contains(conversionUrl) &&
-                urlSafe.contains(conversionOffer) &&
-                urlSafe.contains(conversionSub) &&
-                urlSafe.contains(conversionL) &&
-                urlSafe.contains(conversionTid)
-    }
+    private fun logEventIfUrlIsSuitable(urlSafe: String) {
+        conversions.forEach {
+            if (urlSafe.contains(it.offerId!!) && (urlSafe.contains(it.l!!))) {
+                val uri = Uri.parse(urlSafe)
+                val args = uri.queryParameterNames
+                val bundle = Bundle()
 
+                args.forEach { key ->
+                    bundle.putString(key, uri.getQueryParameter(key))
+                }
+
+                logEvent(it.conversionEvent!!, bundle)
+            }
+        }
+    }
 
     override fun onBackPressed() {
         if (webView.canGoBack()) {
